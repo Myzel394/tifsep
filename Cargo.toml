@@ -1,0 +1,12 @@
+[package]
+name = "tcp_test"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = "0.11.23"
+rustls = "0.22.2"
+tokio = "1.35.1"
+webpki-roots = "0.26.0"
