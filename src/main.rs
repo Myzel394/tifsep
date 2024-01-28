@@ -1,15 +1,21 @@
+use std::{cmp::min, io::Read};
+
 use client::client::{Client, PACKET_SIZE};
+use engines::{duckduckgo::duckduckgo::DuckDuckGo, engine_base::engine_base::EngineBase};
 
 pub mod client;
-
-fn handle_response(packet: &[u8; PACKET_SIZE], bytes: &[u8]) {
-    println!("===========");
-    let response = String::from_utf8_lossy(packet);
-    dbg!(&packet.len());
-    println!("{}", response);
-}
+pub mod engines;
 
 fn main() {
-    let client = Client::new("https://www.google.com/");
-    client.request(&"GET", handle_response);
+    let mut ddg = DuckDuckGo::new();
+    let client = Client::new("https://html.duckduckgo.com/html/");
+
+    let packets = client.request(&"POST").unwrap();
+
+    for ii in (0..packets.len()).step_by(PACKET_SIZE) {
+        let end_range = min(packets.len(), ii + PACKET_SIZE);
+
+        let slice = &packets[ii..end_range];
+        &ddg.parse_packet(slice.iter());
+    }
 }

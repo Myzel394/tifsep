@@ -58,7 +58,16 @@ pub mod client {
                     "{} {} HTTP/1.1\r\n",
                     "Host: {}\r\n",
                     "Connection: close\r\n",
-                    "Accept-Encoding: identity\r\n",
+                    // "Accept-Encoding: identity\r\n",
+                    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n",
+                    "Upgrade-Insecure-Requests: 1\r\n",
+                    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8\r\n",
+                    "Dnt: 1\r\n",
+                    "Accept-Language: en-US,en;q=0.9\r\n",
+                    "Content-Type: application/x-www-form-urlencoded\r\n",
+                    "Content-Length: 6\r\n",
+                    "\r\n",
+                    "q=duck\r\n",
                     "\r\n",
                 ),
                 method,
@@ -70,13 +79,14 @@ pub mod client {
         pub fn request(
             &self,
             method: &str,
-            on_partial: fn(&[u8; PACKET_SIZE], &[u8]),
+            // on_partial: Box<dyn FnMut(&[u8; PACKET_SIZE], &[u8])>,
         ) -> Result<Vec<u8>, Box<dyn Error>> {
             let mut connection = self.create_connection()?;
 
             let mut sock = self.create_tcp_stream()?;
             let mut tls = rustls::Stream::new(&mut connection, &mut sock);
             let http_header = self.create_http_header(method)?;
+            dbg!(&http_header);
             tls.write_all(&http_header.as_bytes())?;
 
             // Read packages one by one
@@ -86,7 +96,7 @@ pub mod client {
 
                 let n = tls.read(&mut buf)?;
 
-                on_partial(&buf, &data);
+                // (on_partial)(&buf, &data);
 
                 if n == 0 {
                     break;
