@@ -8,6 +8,6 @@ pub mod engine_base {
     pub trait EngineBase {
         fn get_search_results(&self) -> &Vec<SearchResult>;
 
-        fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>);
+        fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) -> String;
     }
 }

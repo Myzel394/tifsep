@@ -1,5 +1,6 @@
 // Search engine parser for DuckDuckGo
 pub mod duckduckgo {
+    use lazy_regex::regex_replace_all;
     // Results start at:
     //     <div id="links" class="results">
     // Example for a result:
@@ -35,13 +36,18 @@ pub mod duckduckgo {
     //     </div>
     use lazy_static::lazy_static;
     use regex::Regex;
+    use urlencoding::decode;
 
-    use crate::engines::engine_base::engine_base::{EngineBase, SearchResult};
+    use crate::{
+        engines::engine_base::engine_base::{EngineBase, SearchResult},
+        utils::utils::{decode_html_text, replace_html_unicode},
+    };
 
     lazy_static! {
         static ref RESULTS_START: Regex = Regex::new(r#"id=\"links\""#).unwrap();
-        static ref SINGLE_RESULT: Regex = Regex::new(r#"<div class="result.*?<a.*?href="(?<url>.*?)".*?>(?<title>.*?)<\/a>.*?class="result__snippet".*?>(?<description>.*?)<\/a>.*?class="clear".*?<\/div>( <\/div>){2}"#).unwrap();
+        static ref SINGLE_RESULT: Regex = Regex::new(r#"<div class="result results_links.*?<a.*?href="(?P<url>.*?)".*?>(?P<title>.*?)</a>.*?class="result__snippet".*?>(?P<description>.*?)</a>.*?class="clear".*?</div>(?P<end> </div>){2}"#).unwrap();
         static ref STRIP: Regex = Regex::new(r"\s+").unwrap();
+        static ref STRIP_HTML_TAGS: Regex = Regex::new(r#"<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>"#).unwrap();
     }
 
     pub struct DuckDuckGo {
@@ -50,12 +56,23 @@ pub mod duckduckgo {
         previous_block: String,
     }
 
+    impl DuckDuckGo {
+        fn slice_remaining_block(&mut self, start_position: &usize) {
+            let previous_block_bytes = self.previous_block.as_bytes().to_vec();
+            let remaining_bytes = previous_block_bytes[*start_position..].to_vec();
+            let remaining_text = String::from_utf8(remaining_bytes).unwrap();
+
+            self.previous_block.clear();
+            self.previous_block.push_str(&remaining_text);
+        }
+    }
+
     impl EngineBase for DuckDuckGo {
         fn get_search_results(&self) -> &Vec<SearchResult> {
             &self.search_results
         }
 
-        fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {
+        fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) -> String {
             let bytes: Vec<u8> = packet.map(|bit| *bit).collect();
             let raw_text = String::from_utf8_lossy(&bytes);
             let text = STRIP.replace_all(&raw_text, " ");
@@ -65,16 +82,23 @@ pub mod duckduckgo {
 
                 match SINGLE_RESULT.captures(&self.previous_block.to_owned()) {
                     Some(captures) => {
-                        self.previous_block.clear();
-                        println!("{}", &captures.name("title").unwrap().as_str());
-                        println!("{}", &captures.name("description").unwrap().as_str());
-                        println!("{}", &captures.name("url").unwrap().as_str());
+                        let title = decode(captures.name("title").unwrap().as_str()).unwrap();
+                        let description_raw =
+                            decode_html_text(captures.name("description").unwrap().as_str())
+                                .unwrap();
+                        let description = STRIP_HTML_TAGS.replace_all(&description_raw, "");
+                        let url = decode(captures.name("url").unwrap().as_str()).unwrap();
+
+                        let end_position = captures.name("end").unwrap().end();
+                        self.slice_remaining_block(&end_position);
                     }
                     None => {}
                 }
             } else if RESULTS_START.is_match(&text) {
                 self.results_started = true;
             }
+
+            "".to_owned()
         }
     }
 
