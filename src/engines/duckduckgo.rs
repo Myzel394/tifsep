@@ -1,46 +1,23 @@
 // Search engine parser for DuckDuckGo
 pub mod duckduckgo {
-    use lazy_regex::regex_replace_all;
-    // Results start at:
-    //     <div id="links" class="results">
-    // Example for a result:
-    //     <div class="result results_links results_links_deep web-result ">
-    //         <div class="links_main links_deep result__body">
-    //             <h2 class="result__title">
-    //                 <a
-    //                     rel="nofollow" class="result__a"
-    //                     href="https://www.speedtest.net/">
-    //                     Speedtest by Ookla - The Global Broadband Speed Test
-    //                 </a>
-    //             </h2>
-    //             <div class="result__extras">
-    //                 <div class="result__extras__url">
-    //                     <span class="result__icon">
-    //                       <a rel="nofollow" href="https://www.speedtest.net/">
-    //                         <img class="result__icon__img" width="16" height="16" alt=""
-    //                           src="//external-content.duckduckgo.com/ip3/www.speedtest.net.ico" name="i15" />
-    //                       </a>
-    //                   </span>
-    //                     <a class="result__url" href="https://www.speedtest.net/">
-    //                         www.speedtest.net
-    //                     </a>
-    //                 </div>
-    //             </div>
-    //             <a
-    //                 class="result__snippet"
-    //                 href="https://www.speedtest.net/">
-    //                     Use Speedtest on all your devices with our free desktop and mobile apps.
-    //             </a>
-    //             <div class="clear"></div>
-    //         </div>
-    //     </div>
+    use std::{
+        cmp::min,
+        collections::VecDeque,
+        pin::Pin,
+        str::Bytes,
+        task::{Context, Poll},
+    };
+
+    use async_trait::async_trait;
+    use futures::Stream;
     use lazy_static::lazy_static;
     use regex::Regex;
     use urlencoding::decode;
 
     use crate::{
-        engines::engine_base::engine_base::{EngineBase, SearchResult},
-        utils::utils::{decode_html_text, replace_html_unicode},
+        client::client::{Client, PACKET_SIZE},
+        engines::engine_base::engine_base::{EngineBase, SearchEngine, SearchResult},
+        utils::utils::decode_html_text,
     };
 
     lazy_static! {
@@ -50,10 +27,15 @@ pub mod duckduckgo {
         static ref STRIP_HTML_TAGS: Regex = Regex::new(r#"<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>"#).unwrap();
     }
 
+    pub type CallbackType = Box<dyn FnMut(SearchResult) -> () + Send + Sync>;
+
     pub struct DuckDuckGo {
-        pub search_results: Vec<SearchResult>,
+        callback: CallbackType,
+        pub completed: bool,
         results_started: bool,
         previous_block: String,
+        // Holds all results until consumed by iterator
+        pub results: VecDeque<SearchResult>,
     }
 
     impl DuckDuckGo {
@@ -65,14 +47,86 @@ pub mod duckduckgo {
             self.previous_block.clear();
             self.previous_block.push_str(&remaining_text);
         }
-    }
 
-    impl EngineBase for DuckDuckGo {
-        fn get_search_results(&self) -> &Vec<SearchResult> {
-            &self.search_results
+        pub fn new() -> Self {
+            Self {
+                callback: Box::new(|_: SearchResult| {}),
+                results_started: false,
+                previous_block: String::new(),
+                results: VecDeque::new(),
+                completed: false,
+            }
         }
 
-        fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) -> String {
+        pub fn set_callback(&mut self, callback: CallbackType) {
+            self.callback = callback;
+        }
+    }
+
+    // impl Stream for DuckDuckGo {
+    //     type Item = String;
+    //
+    //     fn poll_next(
+    //         self: Pin<&mut Self>,
+    //         cx: &mut Context<'_>,
+    //     ) -> std::task::Poll<Option<Self::Item>> {
+    //         if self.results.len() > 0 {
+    //             let result = &mut self.results.pop_front().unwrap();
+    //
+    //             let html = format!("<br><h2>{}</h2><p>{}</p>", result.title, result.description);
+    //
+    //             return Poll::Ready(Some(html));
+    //         }
+    //
+    //         if self.completed {
+    //             return Poll::Ready(None);
+    //         }
+    //
+    //         Poll::Pending
+    //     }
+    // }
+
+    // impl Iterator for DuckDuckGo {
+    //     type Item = SearchResult;
+    //
+    //     fn next(&mut self) -> Option<SearchResult> {
+    //         if self.results.len() > 0 {
+    //             let oldest = self.results.pop_front().unwrap();
+    //
+    //             Some(oldest)
+    //         } else {
+    //             None
+    //         }
+    //     }
+    // }
+
+    #[async_trait]
+    impl EngineBase for DuckDuckGo {
+        fn search(&mut self, query: &str) {
+            dbg!("searching duckduckgo");
+
+            let client = Client::new("https://html.duckduckgo.com/html/");
+
+            let packets = client.request(&"POST").unwrap();
+
+            for ii in (0..packets.len()).step_by(PACKET_SIZE) {
+                let end_range = min(packets.len(), ii + PACKET_SIZE);
+
+                let slice = &packets[ii..end_range];
+                self.parse_packet(slice.iter());
+
+                // Call callback, there is probably a better way to do this
+                // while self.results.len() > 0 {
+                //     let result = self.results.pop_front().unwrap();
+                //
+                //     (self.callback)(result);
+                // }
+            }
+
+            self.completed = true;
+        }
+
+        fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {
             let bytes: Vec<u8> = packet.map(|bit| *bit).collect();
             let raw_text = String::from_utf8_lossy(&bytes);
             let text = STRIP.replace_all(&raw_text, " ");
@@ -82,32 +136,37 @@ pub mod duckduckgo {
 
                 match SINGLE_RESULT.captures(&self.previous_block.to_owned()) {
                     Some(captures) => {
-                        let title = decode(captures.name("title").unwrap().as_str()).unwrap();
+                        let title = decode(captures.name("title").unwrap().as_str())
+                            .unwrap()
+                            .into_owned();
                         let description_raw =
                             decode_html_text(captures.name("description").unwrap().as_str())
                                 .unwrap();
-                        let description = STRIP_HTML_TAGS.replace_all(&description_raw, "");
-                        let url = decode(captures.name("url").unwrap().as_str()).unwrap();
+                        let description = STRIP_HTML_TAGS
+                            .replace_all(&description_raw, "")
+                            .into_owned();
+                        let url = decode(captures.name("url").unwrap().as_str())
+                            .unwrap()
+                            .into_owned();
+
+                        let result = SearchResult {
+                            title,
+                            description,
+                            url,
+                            engine: SearchEngine::DuckDuckGo,
+                        };
 
                         let end_position = captures.name("end").unwrap().end();
                         self.slice_remaining_block(&end_position);
+
+                        // (self.callback)(result);
+
+                        self.results.push_back(result);
                     }
                     None => {}
                 }
             } else if RESULTS_START.is_match(&text) {
                 self.results_started = true;
-            }
-
-            "".to_owned()
-        }
-    }
-
-    impl DuckDuckGo {
-        pub fn new() -> Self {
-            Self {
-                search_results: Vec::new(),
-                results_started: false,
-                previous_block: String::new(),
             }
         }
     }
