@@ -17,6 +17,6 @@ pub mod engine_base {
     #[async_trait]
     pub trait EngineBase {
         fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>);
-        fn search(&mut self, query: &str);
+        async fn search(&mut self, query: &str);
     }
 }

@@ -26,13 +26,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use rocket::response::stream::{ReaderStream, TextStream};
+use futures::lock::Mutex;
+use rocket::response::stream::TextStream;
 
-use engines::{
-    duckduckgo::duckduckgo::DuckDuckGo, engine_base::engine_base::EngineBase,
-    engine_base::engine_base::SearchResult,
-};
-use tokio::sync::Mutex;
+use engines::duckduckgo::duckduckgo::DuckDuckGo;
 
 pub mod client;
 pub mod engines;
@@ -66,55 +63,52 @@ fn search_get() -> &'static str {
 async fn hello<'a>(query: &str) -> TextStream![String] {
     let query_box = Box::new(query.to_string());
 
+    let ddg_ref = Arc::new(Mutex::new(DuckDuckGo::new()));
+    let ddg_writer_ref = ddg_ref.clone();
+
+    tokio::spawn(async move {
+        let mut ddg = ddg_writer_ref.lock().await;
+        ddg.search(&query_box).await;
+    });
+
+    let mut current_index = 0;
+
     TextStream! {
-        let start = "<html><body>".to_string();
+        let start = "<DOCTYPE!html><html><body>".to_string();
         yield start;
 
-        let ddg_tv = Arc::new(
-            Mutex::new(
-                DuckDuckGo::new(),
-            ),
-        );
-        let ddg_tv_clone = ddg_tv.clone();
-
-        tokio::spawn(async move {
-            ddg_tv_clone.lock().await.search(&query_box);
-        });
-
-        let mut last_position: i32 = -1;
-
         loop {
-            let ddg = ddg_tv.lock().await;
-            let len = ddg.results.len() as i32;
+            let ddg = ddg_ref.lock().await;
 
-            if ddg.completed && last_position == len {
-                break;
+            let len = ddg.results.len();
+
+            if len == 0 {
+                continue
             }
 
-            if last_position < (len - 1) {
-                for i in max(0, last_position)..=(len - 1) {
-                    match ddg.results.get(i as usize).clone() {
-                        Some(result) => {
-                            let html = format!("<br><h2>{}</h2><p>{}</p>", result.title, result.description);
-                            yield html;
-                        }
-                        None => {
-                            break;
-                        }
-                    }
-                }
-
-                last_position = len;
+            if ddg.completed && current_index == len - 1 {
+                break
             }
+
+            for ii in (current_index + 1)..len {
+                let result = ddg.results.get(ii);
+
+                dbg!(&result);
+            }
+
+            // [1] -> 0
+            // 1 -> [1]
+            current_index = len - 1;
         }
 
         let end = "</body></html>".to_string();
-        yield end;
+
+        yield end
     }
 }
 
 #[launch]
-fn rocket() -> _ {
+async fn rocket() -> _ {
     rocket::build()
         .mount("/", routes![index])
         .mount("/", routes![hello])

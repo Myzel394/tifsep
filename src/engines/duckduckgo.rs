@@ -1,17 +1,16 @@
 // Search engine parser for DuckDuckGo
 pub mod duckduckgo {
     use std::{
-        cmp::min,
         collections::VecDeque,
-        pin::Pin,
-        str::Bytes,
+        pin::{pin, Pin},
         task::{Context, Poll},
     };
 
     use async_trait::async_trait;
-    use futures::Stream;
+    use futures::{FutureExt, Stream, StreamExt};
     use lazy_static::lazy_static;
     use regex::Regex;
+    use rocket::http::hyper::body::Bytes;
     use urlencoding::decode;
 
     use crate::{
@@ -35,32 +34,7 @@ pub mod duckduckgo {
         results_started: bool,
         previous_block: String,
         // Holds all results until consumed by iterator
-        pub results: VecDeque<SearchResult>,
-    }
-
-    impl DuckDuckGo {
-        fn slice_remaining_block(&mut self, start_position: &usize) {
-            let previous_block_bytes = self.previous_block.as_bytes().to_vec();
-            let remaining_bytes = previous_block_bytes[*start_position..].to_vec();
-            let remaining_text = String::from_utf8(remaining_bytes).unwrap();
-
-            self.previous_block.clear();
-            self.previous_block.push_str(&remaining_text);
-        }
-
-        pub fn new() -> Self {
-            Self {
-                callback: Box::new(|_: SearchResult| {}),
-                results_started: false,
-                previous_block: String::new(),
-                results: VecDeque::new(),
-                completed: false,
-            }
-        }
-
-        pub fn set_callback(&mut self, callback: CallbackType) {
-            self.callback = callback;
-        }
+        pub results: Vec<SearchResult>,
     }
 
     // impl Stream for DuckDuckGo {
@@ -100,33 +74,80 @@ pub mod duckduckgo {
     //     }
     // }
 
+    pub struct DuckDuckGoSearchStream<'a> {
+        pub ddg: &'a DuckDuckGo,
+    }
+
+    impl<'a> DuckDuckGoSearchStream<'a> {
+        pub fn new(ddg: &'a DuckDuckGo) -> Self {
+            Self { ddg }
+        }
+    }
+
     #[async_trait]
-    impl EngineBase for DuckDuckGo {
-        fn search(&mut self, query: &str) {
-            dbg!("searching duckduckgo");
+    impl Stream for DuckDuckGoSearchStream<'_> {
+        type Item = SearchResult;
 
-            let client = Client::new("https://html.duckduckgo.com/html/");
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
 
-            let packets = client.request(&"POST").unwrap();
+    impl DuckDuckGo {
+        pub fn get_stream<'a>(&'a self) -> impl Stream<Item = SearchResult> + 'a {
+            DuckDuckGoSearchStream { ddg: self }
+        }
 
-            for ii in (0..packets.len()).step_by(PACKET_SIZE) {
-                let end_range = min(packets.len(), ii + PACKET_SIZE);
+        fn slice_remaining_block(&mut self, start_position: &usize) {
+            let previous_block_bytes = self.previous_block.as_bytes().to_vec();
+            let remaining_bytes = previous_block_bytes[*start_position..].to_vec();
+            let remaining_text = String::from_utf8(remaining_bytes).unwrap();
 
-                let slice = &packets[ii..end_range];
-                self.parse_packet(slice.iter());
+            self.previous_block.clear();
+            self.previous_block.push_str(&remaining_text);
+        }
 
-                // Call callback, there is probably a better way to do this
-                // while self.results.len() > 0 {
-                //     let result = self.results.pop_front().unwrap();
-                //
-                //     (self.callback)(result);
-                // }
+        pub fn new() -> Self {
+            Self {
+                callback: Box::new(|_: SearchResult| {}),
+                results_started: false,
+                previous_block: String::new(),
+                results: vec![],
+                completed: false,
+            }
+        }
+
+        pub fn set_callback(&mut self, callback: CallbackType) {
+            self.callback = callback;
+        }
+
+        pub async fn search(&mut self, query: &str) {
+            let client = reqwest::Client::new();
+
+            let mut stream = client
+                .post("https://html.duckduckgo.com/html/")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body("q=duck")
+                .send()
+                .await
+                .unwrap()
+                .bytes_stream();
+
+            while let Some(item) = stream.next().await {
+                let packet = item.unwrap();
+
+                if let Some(result) = self.parse_packet(packet.iter()) {
+                    self.results.push(result);
+                }
             }
 
             self.completed = true;
         }
 
-        fn parse_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {
+        fn parse_packet<'a>(
+            &mut self,
+            packet: impl Iterator<Item = &'a u8>,
+        ) -> Option<SearchResult> {
             let bytes: Vec<u8> = packet.map(|bit| *bit).collect();
             let raw_text = String::from_utf8_lossy(&bytes);
             let text = STRIP.replace_all(&raw_text, " ");
@@ -159,15 +180,15 @@ pub mod duckduckgo {
                         let end_position = captures.name("end").unwrap().end();
                         self.slice_remaining_block(&end_position);
 
-                        // (self.callback)(result);
-
-                        self.results.push_back(result);
+                        return Some(result);
                     }
                     None => {}
                 }
             } else if RESULTS_START.is_match(&text) {
                 self.results_started = true;
             }
+
+            None
         }
     }
 }
