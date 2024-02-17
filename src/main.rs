@@ -21,25 +21,28 @@
 // Found no other way to make this work
 #![feature(async_closure)]
 
-use std::{
-    cmp::max,
-    sync::{Arc, RwLock},
-};
+use std::sync::Arc;
 
 use futures::lock::Mutex;
-use rocket::response::stream::TextStream;
+use lazy_static::lazy_static;
+use rocket::response::{content::RawHtml, stream::TextStream};
 
 use engines::duckduckgo::duckduckgo::DuckDuckGo;
 
+use crate::static_files::static_files::read_file_contents;
+
 pub mod client;
 pub mod engines;
+pub mod static_files;
 pub mod utils;
 
 #[macro_use]
 extern crate rocket;
 
-struct SearchParams<'r> {
-    query: &'r str,
+lazy_static! {
+    static ref HTML_BEGINNING: String = read_file_contents("./src/html/beginning.html").unwrap();
+    static ref HTML_END: String = read_file_contents("./src/html/end.html").unwrap();
+    static ref TAILWIND_CSS: String = read_file_contents("./tailwindcss/output.css").unwrap();
 }
 
 #[get("/")]
@@ -59,23 +62,28 @@ fn search_get() -> &'static str {
     </html>"
 }
 
+#[get("/tailwind.css")]
+fn get_tailwindcss() -> &'static str {
+    &TAILWIND_CSS
+}
+
 #[get("/searchquery?<query>")]
-async fn hello<'a>(query: &str) -> TextStream![String] {
+async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
     let query_box = Box::new(query.to_string());
 
     let ddg_ref = Arc::new(Mutex::new(DuckDuckGo::new()));
-    let ddg_writer_ref = ddg_ref.clone();
+    let ddg_ref_writer = ddg_ref.clone();
 
     tokio::spawn(async move {
-        let mut ddg = ddg_writer_ref.lock().await;
+        let mut ddg = ddg_ref_writer.lock().await;
+
         ddg.search(&query_box).await;
     });
 
     let mut current_index = 0;
 
-    TextStream! {
-        let start = "<DOCTYPE!html><html><body>".to_string();
-        yield start;
+    RawHtml(TextStream! {
+        yield HTML_BEGINNING.to_string();
 
         loop {
             let ddg = ddg_ref.lock().await;
@@ -91,9 +99,11 @@ async fn hello<'a>(query: &str) -> TextStream![String] {
             }
 
             for ii in (current_index + 1)..len {
-                let result = ddg.results.get(ii);
+                let result = ddg.results.get(ii).unwrap();
 
-                dbg!(&result);
+                let text = format!("<li><h1>{}</h1><p>{}</p></li>", &result.title, &result.description);
+
+                yield text.to_string();
             }
 
             // [1] -> 0
@@ -101,10 +111,8 @@ async fn hello<'a>(query: &str) -> TextStream![String] {
             current_index = len - 1;
         }
 
-        let end = "</body></html>".to_string();
-
-        yield end
-    }
+        yield HTML_END.to_string();
+    })
 }
 
 #[launch]
@@ -113,4 +121,5 @@ async fn rocket() -> _ {
         .mount("/", routes![index])
         .mount("/", routes![hello])
         .mount("/", routes![search_get])
+        .mount("/", routes![get_tailwindcss])
 }

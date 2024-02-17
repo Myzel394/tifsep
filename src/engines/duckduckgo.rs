@@ -1,16 +1,14 @@
 // Search engine parser for DuckDuckGo
 pub mod duckduckgo {
     use std::{
-        collections::VecDeque,
         pin::{pin, Pin},
         task::{Context, Poll},
     };
 
     use async_trait::async_trait;
-    use futures::{FutureExt, Stream, StreamExt};
+    use futures::{AsyncRead, FutureExt, Stream, StreamExt};
     use lazy_static::lazy_static;
     use regex::Regex;
-    use rocket::http::hyper::body::Bytes;
     use urlencoding::decode;
 
     use crate::{
@@ -32,7 +30,7 @@ pub mod duckduckgo {
         callback: CallbackType,
         pub completed: bool,
         results_started: bool,
-        previous_block: String,
+        pub previous_block: String,
         // Holds all results until consumed by iterator
         pub results: Vec<SearchResult>,
     }
@@ -127,34 +125,56 @@ pub mod duckduckgo {
             let mut stream = client
                 .post("https://html.duckduckgo.com/html/")
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .body("q=duck")
+                .body(format!("q={}", query))
                 .send()
                 .await
                 .unwrap()
                 .bytes_stream();
 
+            dbg!("before");
             while let Some(item) = stream.next().await {
                 let packet = item.unwrap();
+                dbg!(packet.len());
 
                 if let Some(result) = self.parse_packet(packet.iter()) {
                     self.results.push(result);
                 }
             }
+            dbg!("after");
+
+            while let Some(result) = self.parse_next() {
+                self.results.push(result);
+            }
+            dbg!("competed");
 
             self.completed = true;
         }
 
-        fn parse_packet<'a>(
-            &mut self,
-            packet: impl Iterator<Item = &'a u8>,
-        ) -> Option<SearchResult> {
+        pub fn push_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {
             let bytes: Vec<u8> = packet.map(|bit| *bit).collect();
             let raw_text = String::from_utf8_lossy(&bytes);
             let text = STRIP.replace_all(&raw_text, " ");
 
             if self.results_started {
                 self.previous_block.push_str(&text);
+            } else {
+                self.results_started = RESULTS_START.is_match(&text);
+            }
+        }
 
+        /// Push packet to internal block and return next available search result, if available
+        fn parse_packet<'a>(
+            &mut self,
+            packet: impl Iterator<Item = &'a u8>,
+        ) -> Option<SearchResult> {
+            self.push_packet(packet);
+
+            self.parse_next()
+        }
+
+        /// Get next search result, if available, from internal stored block
+        fn parse_next<'a>(&mut self) -> Option<SearchResult> {
+            if self.results_started {
                 match SINGLE_RESULT.captures(&self.previous_block.to_owned()) {
                     Some(captures) => {
                         let title = decode(captures.name("title").unwrap().as_str())
@@ -184,8 +204,6 @@ pub mod duckduckgo {
                     }
                     None => {}
                 }
-            } else if RESULTS_START.is_match(&text) {
-                self.results_started = true;
             }
 
             None
