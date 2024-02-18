@@ -7,13 +7,16 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1.77"
+bytes = "1.5.0"
 futures = "0.3.30"
 lazy-regex = "3.1.0"
 lazy_static = "1.4.0"
+mio = { version = "0.8.10", features = ["net", "os-poll", ] }
 regex = "1.10.3"
 reqwest = { version = "0.11.23", features = ["stream"] }
 rocket = "0.5.0"
-rustls = "0.22.2"
+rustls = { path = "../rustls/rustls", features = ["logging"] }
+rustls-pemfile = "2"
 tokio = {version = "1.35.1", features = ["full"]}
 urlencoding = "2.1.3"
 webpki-roots = "0.26.0"
