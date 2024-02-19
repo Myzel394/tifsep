@@ -12,7 +12,7 @@ pub mod brave {
 
     lazy_static! {
         static ref RESULTS_START: Regex = Regex::new(r#"<body"#).unwrap();
-        static ref SINGLE_RESULT: Regex = Regex::new(r#"<div class="snippet svelte-.+?<a href=.(?P<url>.+?)".?((class="title svelt.+?">(?P<title>.+?))|(class="h.? svelte.+?<div class="title.+?>(?P<title2>.+?)<)).+?<!-- HTML_TAG_START -->(?P<description>.+?)<!-- HTML_TAG_END -->(?P<end>(.*?<\/div>( <\/div>){2})|(</div>.*?</div>.*?<div class="deep.*?data-sveltekit-reload.*?</div></div>.*?</div>))"#).unwrap();
+        static ref SINGLE_RESULT: Regex = Regex::new(r#"<div class="snippet svelte-.+?<a href=.(?P<url>.+?)".+?<div class="title svelte-.+?">(?P<title>.+?)</div></div>.+?<div class="snippet-description.+?">(?P<description>.+?)</div></div>"#).unwrap();
         static ref STRIP: Regex = Regex::new(r"\s+").unwrap();
         static ref STRIP_HTML_TAGS: Regex = Regex::new(r#"<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>"#).unwrap();
     }
@@ -53,14 +53,9 @@ pub mod brave {
             if self.results_started {
                 match SINGLE_RESULT.captures(&self.previous_block.to_owned()) {
                     Some(captures) => {
-                        let title = decode(
-                            captures
-                                .name("title")
-                                .unwrap_or_else(|| captures.name("title2").unwrap())
-                                .as_str(),
-                        )
-                        .unwrap()
-                        .into_owned();
+                        let title = decode(captures.name("title").unwrap().as_str())
+                            .unwrap()
+                            .into_owned();
                         let description_raw =
                             decode_html_text(captures.name("description").unwrap().as_str())
                                 .unwrap();
@@ -78,7 +73,7 @@ pub mod brave {
                             engine: SearchEngine::DuckDuckGo,
                         };
 
-                        let end_position = captures.name("end").unwrap().end();
+                        let end_position = captures.get(0).unwrap().end();
                         self.slice_remaining_block(&end_position);
 
                         return Some(result);

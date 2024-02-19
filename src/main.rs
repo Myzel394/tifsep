@@ -118,6 +118,8 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
             current_index = len - 1;
         }
 
+        let diff = brave_first_result_start.elapsed().whole_milliseconds();
+        yield format!("<strong>End taken: {}ms</strong>", diff);
         yield HTML_END.to_string();
     })
 }
