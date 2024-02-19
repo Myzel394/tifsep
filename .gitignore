@@ -2,3 +2,5 @@
 build
 
 ./tailwindcss/node_modules/*
+tailwindcss/node_modules
+tailwindcss/node_modules/*
