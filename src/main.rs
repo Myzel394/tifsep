@@ -7,6 +7,8 @@ use lazy_static::lazy_static;
 use reqwest::ClientBuilder;
 use rocket::response::content::{RawCss, RawHtml};
 use rocket::response::stream::TextStream;
+use rocket::time::Instant;
+use utils::utils::Yieldable;
 
 use crate::helpers::helpers::run_search;
 use crate::static_files::static_files::read_file_contents;
@@ -54,6 +56,8 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
     let completed_ref_writer = completed_ref.clone();
     let brave_ref = Arc::new(Mutex::new(Brave::new()));
     let brave_ref_writer = brave_ref.clone();
+    let mut brave_first_result_has_yielded = false;
+    let brave_first_result_start = Instant::now();
     let client = Arc::new(Box::new(
         ClientBuilder::new().user_agent(USER_AGENT).build().unwrap(),
     ));
@@ -91,6 +95,13 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
                 break
             }
             drop(completed);
+
+            if !brave_first_result_has_yielded {
+                let diff = brave_first_result_start.elapsed().whole_milliseconds();
+                brave_first_result_has_yielded = true;
+
+                yield format!("<strong>Time taken: {}ms</strong>", diff);
+            }
 
             for ii in (current_index + 1)..len {
                 let result = brave.results.get(ii).unwrap();

@@ -323,4 +323,10 @@ pub mod utils {
             }
         ).to_string()
     }
+
+    pub enum Yieldable<T> {
+        AwaitingValue,
+        YieldRequired(T),
+        Completed(T),
+    }
 }
