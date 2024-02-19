@@ -20,7 +20,7 @@
 
 // Found no other way to make this work
 use crate::engines::engine_base::engine_base::EngineBase;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::str;
 use std::sync::Arc;
@@ -28,7 +28,9 @@ use std::time::Instant;
 
 use engines::brave::brave::Brave;
 use futures::lock::Mutex;
+use futures::StreamExt;
 use lazy_static::lazy_static;
+use reqwest::ClientBuilder;
 use rocket::response::{
     content::{RawCss, RawHtml},
     stream::TextStream,
@@ -98,7 +100,7 @@ async fn slowresponse() -> TextStream![String] {
 
 #[get("/searchquery?<query>")]
 async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
-    let query_box = Box::new(query.to_string());
+    let query_box = query.to_string();
     let now = Arc::new(Box::new(Instant::now()));
 
     let completed_ref = Arc::new(Mutex::new(false));
@@ -202,43 +204,65 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
         let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
         let mut sock = TcpStream::connect("search.brave.com:443").unwrap();
         let mut tls = rustls::Stream::new(&mut conn, &mut sock);
+        let now_sock = Instant::now();
         tls.write_all(
-            concat!(
-                "GET /search?q=test&show_local=0&source=unlocalise HTTP/1.1\r\n",
-                "Host: search.brave.com\r\n",
-                "Connection: close\r\n",
-                "Accept-Encoding: identity\r\n",
-                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.3\r\n",
-                "\r\n",
+            format!(
+                "GET /search?q={}&show_local=0&source=unlocalise HTTP/1.1\r\nHost: www.google.com\r\nConnection: close\r\nAccept-Encoding: identity\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.3\r\n\r\n",
+                query_box,
             )
             .as_bytes(),
         )
         .unwrap();
 
-        loop {
-            let mut buf = [0; 65535];
-            tls.conn.complete_io(tls.sock);
-            let n = tls.conn.reader().read(&mut buf);
+        let nw = Instant::now();
 
-            // dbg!(&n);
+        let client = ClientBuilder::new().build().unwrap();
+        let resposne = client
+            .get("https://www.bing.com/search?q=test")
+            .send()
+            .await
+            .unwrap();
 
-            if n.is_ok() {
-                let n = n.unwrap();
-                if n == 0 {
-                    break;
-                }
-                // println!("{}", String::from_utf8_lossy(&buf));
-                let mut brave = ddg_ref_writer.lock().await;
+        dbg!(nw.elapsed());
 
-                if let Some(result) = brave.parse_packet(buf.iter()) {
-                    println!("Brave: {}", now_ref.elapsed().as_millis());
-                    brave.add_result(result);
+        let mut stream = resposne.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
 
-                    drop(brave);
-                    tokio::task::yield_now().await;
-                }
-            }
+            println!("{}", "========");
+            dbg!(nw.elapsed());
+            println!("{}", String::from_utf8_lossy(&chunk));
         }
+
+        dbg!(nw.elapsed());
+
+        // loop {
+        //     let mut buf = [0; 16384];
+        //     let n = tls.conn.reader().read(&mut buf);
+        //
+        //     // dbg!(&n);
+        //
+        //     if n.is_ok() {
+        //         let n = n.unwrap();
+        //         if n == 0 {
+        //             break;
+        //         }
+        //         // println!("{}", String::from_utf8_lossy(&buf));
+        //         // let mut brave = ddg_ref_writer.lock().await;
+        //
+        //         dbg!(nw.elapsed());
+        //
+        //         // if let Some(result) = brave.parse_packet(buf.iter()) {
+        //         //     // println!("Brave: {}", now_ref.elapsed().as_millis());
+        //         //     brave.add_result(result);
+        //         //
+        //         //     drop(brave);
+        //         //     tokio::task::yield_now().await;
+        //         // }
+        //     } else {
+        //         tls.conn.complete_io(tls.sock);
+        //     }
+        // }
 
         let mut completed = completed_ref_writer.lock().await;
         *completed = true;
@@ -255,8 +279,8 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
             let len = ddg.results.len();
 
             if len == 0 {
-            drop(ddg);
-            tokio::task::yield_now().await;
+                drop(ddg);
+                tokio::task::yield_now().await;
                 continue
             }
 
