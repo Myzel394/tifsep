@@ -1,21 +1,19 @@
-use crate::engines::engine_base::engine_base::EngineBase;
 use std::str;
 use std::sync::Arc;
 
 use engines::brave::brave::Brave;
 use futures::lock::Mutex;
-use futures::StreamExt;
 use lazy_static::lazy_static;
 use reqwest::ClientBuilder;
-use rocket::response::{
-    content::{RawCss, RawHtml},
-    stream::TextStream,
-};
+use rocket::response::content::{RawCss, RawHtml};
+use rocket::response::stream::TextStream;
 
+use crate::helpers::helpers::run_search;
 use crate::static_files::static_files::read_file_contents;
 
 pub mod client;
 pub mod engines;
+pub mod helpers;
 pub mod static_files;
 pub mod tsclient;
 pub mod utils;
@@ -56,27 +54,17 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
     let completed_ref_writer = completed_ref.clone();
     let brave_ref = Arc::new(Mutex::new(Brave::new()));
     let brave_ref_writer = brave_ref.clone();
+    let client = Arc::new(Box::new(
+        ClientBuilder::new().user_agent(USER_AGENT).build().unwrap(),
+    ));
+    let client_ref = client.clone();
 
     tokio::spawn(async move {
-        let client = ClientBuilder::new().user_agent(USER_AGENT).build().unwrap();
-        let response = client
+        let request = client_ref
             .get(format!("https://search.brave.com/search?q={}", query_box))
-            .send()
-            .await
-            .unwrap();
+            .send();
 
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let buffer = chunk.unwrap();
-
-            let mut brave = brave_ref_writer.lock().await;
-            if let Some(result) = brave.parse_packet(buffer.iter()) {
-                brave.add_result(result);
-
-                drop(brave);
-                tokio::task::yield_now().await;
-            }
-        }
+        run_search(request, brave_ref_writer).await;
 
         let mut completed = completed_ref_writer.lock().await;
         *completed = true;
@@ -88,12 +76,12 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
         yield HTML_BEGINNING.to_string();
 
         loop {
-            let ddg = brave_ref.lock().await;
+            let brave = brave_ref.lock().await;
 
-            let len = ddg.results.len();
+            let len = brave.results.len();
 
             if len == 0 {
-                drop(ddg);
+                drop(brave);
                 tokio::task::yield_now().await;
                 continue
             }
@@ -105,13 +93,13 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
             drop(completed);
 
             for ii in (current_index + 1)..len {
-                let result = ddg.results.get(ii).unwrap();
+                let result = brave.results.get(ii).unwrap();
 
                 let text = format!("<li><h1>{}</h1><p>{}</p></li>", &result.title, &result.description);
 
                 yield text.to_string();
             }
-            drop(ddg);
+            drop(brave);
             tokio::task::yield_now().await;
 
             // [1] -> 0

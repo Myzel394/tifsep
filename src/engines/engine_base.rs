@@ -1,10 +1,12 @@
 pub mod engine_base {
+    use std::sync::Arc;
+
     use bytes::Bytes;
 
-    use futures::{Stream, StreamExt};
+    use futures::{lock::Mutex, Future, Stream, StreamExt};
     use lazy_static::lazy_static;
     use regex::Regex;
-    use reqwest::Error;
+    use reqwest::{Client, Error, Response};
 
     lazy_static! {
         static ref STRIP: Regex = Regex::new(r"\s+").unwrap();
