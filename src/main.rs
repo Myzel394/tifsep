@@ -1,16 +1,15 @@
-use std::str;
 use std::sync::Arc;
+use std::{str, thread};
 
 use engines::brave::brave::Brave;
+use engines::engine_base::engine_base::{ResultsCollector, SearchResult};
 use futures::lock::Mutex;
 use lazy_static::lazy_static;
-use reqwest::ClientBuilder;
 use rocket::response::content::{RawCss, RawHtml};
 use rocket::response::stream::TextStream;
 use rocket::time::Instant;
-use utils::utils::Yieldable;
+use tokio::sync::mpsc;
 
-use crate::helpers::helpers::run_search;
 use crate::static_files::static_files::read_file_contents;
 
 pub mod client;
@@ -52,73 +51,34 @@ fn get_tailwindcss() -> RawCss<&'static str> {
 async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
     let query_box = query.to_string();
 
-    let completed_ref = Arc::new(Mutex::new(false));
-    let completed_ref_writer = completed_ref.clone();
-    let brave_ref = Arc::new(Mutex::new(Brave::new()));
-    let brave_ref_writer = brave_ref.clone();
-    let mut brave_first_result_has_yielded = false;
-    let brave_first_result_start = Instant::now();
-    let client = Arc::new(Box::new(
-        ClientBuilder::new().user_agent(USER_AGENT).build().unwrap(),
-    ));
-    let client_ref = client.clone();
+    let mut first_result_yielded = false;
+    let first_result_start = Instant::now();
+
+    let (tx, mut rx) = mpsc::channel::<SearchResult>(16);
 
     tokio::spawn(async move {
-        let request = client_ref
-            .get(format!("https://search.brave.com/search?q={}", query_box))
-            .send();
+        let mut brave = Brave::new();
 
-        run_search(request, brave_ref_writer).await;
-
-        let mut completed = completed_ref_writer.lock().await;
-        *completed = true;
+        brave.search(&query_box, tx).await;
     });
-
-    let mut current_index = 0;
 
     RawHtml(TextStream! {
         yield HTML_BEGINNING.to_string();
 
-        loop {
-            let brave = brave_ref.lock().await;
-
-            let len = brave.results.len();
-
-            if len == 0 {
-                drop(brave);
-                tokio::task::yield_now().await;
-                continue
-            }
-
-            let completed = completed_ref.lock().await;
-            if *completed && current_index == len - 1 {
-                break
-            }
-            drop(completed);
-
-            if !brave_first_result_has_yielded {
-                let diff = brave_first_result_start.elapsed().whole_milliseconds();
-                brave_first_result_has_yielded = true;
+        while let Some(result) = rx.recv().await {
+            if !first_result_yielded {
+                let diff = first_result_start.elapsed().whole_milliseconds();
+                first_result_yielded = true;
 
                 yield format!("<strong>Time taken: {}ms</strong>", diff);
             }
 
-            for ii in (current_index + 1)..len {
-                let result = brave.results.get(ii).unwrap();
+            let text = format!("<li><h1>{}</h1><p>{}</p></li>", &result.title, &result.description);
 
-                let text = format!("<li><h1>{}</h1><p>{}</p></li>", &result.title, &result.description);
-
-                yield text.to_string();
-            }
-            drop(brave);
-            tokio::task::yield_now().await;
-
-            // [1] -> 0
-            // 1 -> [1]
-            current_index = len - 1;
+            yield text.to_string();
         }
 
-        let diff = brave_first_result_start.elapsed().whole_milliseconds();
+        let diff = first_result_start.elapsed().whole_milliseconds();
         yield format!("<strong>End taken: {}ms</strong>", diff);
         yield HTML_END.to_string();
     })

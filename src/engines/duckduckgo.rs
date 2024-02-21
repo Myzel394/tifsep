@@ -1,14 +1,7 @@
 // Search engine parser for DuckDuckGo
 pub mod duckduckgo {
-    use std::{
-        io::{Read, Write},
-        net::TcpStream,
-        sync::Arc,
-    };
-
     use lazy_static::lazy_static;
     use regex::Regex;
-    use rustls::RootCertStore;
     use urlencoding::decode;
 
     use crate::{
@@ -72,10 +65,6 @@ pub mod duckduckgo {
     // }
 
     impl EngineBase for DuckDuckGo {
-        fn add_result(&mut self, result: SearchResult) {
-            self.results.push(result);
-        }
-
         fn parse_next<'a>(&mut self) -> Option<SearchResult> {
             if self.results_started {
                 match SINGLE_RESULT.captures(&self.previous_block.to_owned()) {
@@ -122,152 +111,6 @@ pub mod duckduckgo {
             } else {
                 self.results_started = RESULTS_START.is_match(&text);
             }
-        }
-
-        // Searches DuckDuckGo for the given query
-        // Uses rustls as reqwest does not support accessing the raw packets
-        async fn search(&mut self, query: &str) {
-            let root_store =
-                RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let mut config = rustls::ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
-
-            // Allow using SSLKEYLOGFILE.
-            config.key_log = Arc::new(rustls::KeyLogFile::new());
-
-            let now = std::time::Instant::now();
-            let server_name = "html.duckduckgo.com".try_into().unwrap();
-            let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
-            let mut sock = TcpStream::connect("html.duckduckgo.com:443").unwrap();
-            let mut tls = rustls::Stream::new(&mut conn, &mut sock);
-            tls.write_all(
-                concat!(
-                    "POST /html/ HTTP/1.1\r\n",
-                    "Host: html.duckduckgo.com\r\n",
-                    "Connection: cloSe\r\n",
-                    "Accept-Encoding: identity\r\n",
-                    "Content-Length: 6\r\n",
-                    // form data
-                    "Content-Type: application/x-www-form-urlencoded\r\n",
-                    "\r\n",
-                    "q=test",
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-            let mut plaintext = Vec::new();
-            dbg!(now.elapsed());
-
-            loop {
-                let mut buf = [0; 65535];
-                tls.conn.complete_io(tls.sock);
-                let n = tls.conn.reader().read(&mut buf);
-
-                if n.is_ok() {
-                    dbg!(&n);
-                    let n = n.unwrap();
-                    if n == 0 {
-                        break;
-                    }
-                    println!("{}", "=================");
-                    dbg!(now.elapsed());
-                    // println!("{}", String::from_utf8_lossy(&buf));
-                    plaintext.extend_from_slice(&buf);
-                }
-            }
-
-            // let root_store = RootCertStore {
-            //     roots: webpki_roots::TLS_SERVER_ROOTS.into(),
-            // };
-            //
-            // let mut config = rustls::ClientConfig::builder()
-            //     .with_root_certificates(root_store)
-            //     .with_no_client_auth();
-            //
-            // // Allow using SSLKEYLOGFILE.
-            // config.key_log = Arc::new(rustls::KeyLogFile::new());
-            //
-            // let server_name = "html.duckduckgo.com".try_into().unwrap();
-            // let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
-            //
-            // let mut sock = TcpStream::connect("html.duckduckgo.com:443").unwrap();
-            // let mut tls = rustls::Stream::new(&mut conn, &mut sock);
-            // tls.write_all(
-            //     concat!(
-            //         "POST /html/ HTTP/1.1\r\n",
-            //         "Host: html.duckduckgo.com\r\n",
-            //         "Connection: close\r\n",
-            //         "Accept-Encoding: identity\r\n",
-            //         "Content-Length: 6\r\n",
-            //         // form data
-            //         "Content-Type: application/x-www-form-urlencoded\r\n",
-            //         "\r\n",
-            //         "q=test",
-            //     )
-            //     .as_bytes(),
-            // )
-            // .unwrap();
-            // let ciphersuite = tls.conn.negotiated_cipher_suite().unwrap();
-            // writeln!(
-            //     &mut std::io::stderr(),
-            //     "Current ciphersuite: {:?}",
-            //     ciphersuite.suite()
-            // )
-            // .unwrap();
-            //
-            // // Iterate over the stream to read the response.
-            // loop {
-            //     let mut buf = [0u8; 1024];
-            //     let n = tls.read(&mut buf).unwrap();
-            //     if n == 0 {
-            //         break;
-            //     }
-            //
-            //     if let Some(result) = self.parse_packet(buf.iter()) {
-            //         self.add_result(result);
-            //
-            //         // Wait one second
-            //         std::thread::sleep(std::time::Duration::from_millis(100));
-            //     }
-            // }
-            //
-            // while let Some(result) = self.parse_next() {
-            //     self.add_result(result);
-            // }
-            //
-            // dbg!("done with searching");
-
-            // let client = reqwest::Client::new();
-            //
-            // let now = std::time::Instant::now();
-            //
-            // let mut stream = client
-            //     .post("https://html.duckduckgo.com/html/")
-            //     .header("Content-Type", "application/x-www-form-urlencoded")
-            //     .body(format!("q={}", query))
-            //     .send()
-            //     .await
-            //     .unwrap()
-            //     .bytes_stream();
-            //
-            // let diff = now.elapsed();
-            // dbg!(diff);
-            //
-            // while let Some(item) = stream.next().await {
-            //     let packet = item.unwrap();
-            //
-            //     if let Some(result) = self.parse_packet(packet.iter()) {
-            //         self.add_result(result);
-            //     }
-            // }
-            //
-            // while let Some(result) = self.parse_next() {
-            //     self.add_result(result);
-            // }
-            //
-            // let second_diff = now.elapsed();
-            // dbg!(second_diff);
         }
     }
 

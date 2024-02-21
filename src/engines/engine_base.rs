@@ -1,12 +1,11 @@
 pub mod engine_base {
     use std::sync::Arc;
 
-    use bytes::Bytes;
-
-    use futures::{lock::Mutex, Future, Stream, StreamExt};
+    use futures::{lock::Mutex, Future, StreamExt};
     use lazy_static::lazy_static;
     use regex::Regex;
-    use reqwest::{Client, Error, Response};
+    use reqwest::{Error, Response};
+    use tokio::sync::mpsc::Sender;
 
     lazy_static! {
         static ref STRIP: Regex = Regex::new(r"\s+").unwrap();
@@ -25,23 +24,19 @@ pub mod engine_base {
         pub engine: SearchEngine,
     }
 
-    pub trait EngineBase {
-        fn add_result(&mut self, result: SearchResult);
+    /// ResultsCollector collects results across multiple tasks
+    #[derive(Clone, Debug, Hash, Default)]
+    pub struct ResultsCollector {
+        pub started: bool,
+        pub previous_block: String,
+        results: Vec<SearchResult>,
+        current_index: usize,
+    }
 
+    pub trait EngineBase {
         fn parse_next<'a>(&mut self) -> Option<SearchResult>;
 
         fn push_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>);
-        // fn push_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {
-        //     let bytes: Vec<u8> = packet.map(|bit| *bit).collect();
-        //     let raw_text = String::from_utf8_lossy(&bytes);
-        //     let text = STRIP.replace_all(&raw_text, " ");
-        //
-        //     if self.results_started {
-        //         self.previous_block.push_str(&text);
-        //     } else {
-        //         self.results_started = RESULTS_START.is_match(&text);
-        //     }
-        // }
 
         /// Push packet to internal block and return next available search result, if available
         fn parse_packet<'a>(
@@ -53,11 +48,89 @@ pub mod engine_base {
             self.parse_next()
         }
 
-        async fn search(&mut self, query: &str);
+        async fn handle_request(
+            &mut self,
+            request: impl Future<Output = Result<Response, Error>>,
+            tx: Sender<SearchResult>,
+        ) {
+            let mut stream = request.await.unwrap().bytes_stream();
+
+            while let Some(chunk) = stream.next().await {
+                let buffer = chunk.unwrap();
+
+                self.push_packet(buffer.iter());
+
+                while let Some(result) = self.parse_next() {
+                    tx.send(result).await;
+                }
+            }
+
+            while let Some(result) = self.parse_next() {
+                tx.send(result).await;
+            }
+        }
     }
 
-    #[derive(Clone, Debug, Hash, Default)]
-    pub struct ResultsCollector {
-        results: Vec<SearchResult>,
+    impl ResultsCollector {
+        pub fn new() -> Self {
+            Self {
+                results: Vec::new(),
+                current_index: 0,
+                previous_block: String::new(),
+                started: false,
+            }
+        }
+
+        pub fn results(&self) -> &Vec<SearchResult> {
+            &self.results
+        }
+
+        pub fn add_result(&mut self, result: SearchResult) {
+            self.results.push(result);
+        }
+
+        pub fn get_next_items(&self) -> &[SearchResult] {
+            if self.current_index >= self.results.len() {
+                return &[];
+            }
+
+            &self.results[self.current_index + 1..self.results.len()]
+        }
+
+        pub fn update_index(&mut self) {
+            self.current_index = self.results.len() - 1;
+        }
+
+        pub fn has_more_results(&self) -> bool {
+            if self.results.len() == 0 {
+                return true;
+            }
+
+            self.current_index < self.results.len() - 1
+        }
+    }
+
+    #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct EnginePositions {
+        pub previous_block: String,
+        pub started: bool,
+    }
+
+    impl EnginePositions {
+        pub fn new() -> Self {
+            EnginePositions {
+                previous_block: String::new(),
+                started: false,
+            }
+        }
+
+        pub fn slice_remaining_block(&mut self, start_position: &usize) {
+            let previous_block_bytes = self.previous_block.as_bytes().to_vec();
+            let remaining_bytes = previous_block_bytes[*start_position..].to_vec();
+            let remaining_text = String::from_utf8(remaining_bytes).unwrap();
+
+            self.previous_block.clear();
+            self.previous_block.push_str(&remaining_text);
+        }
     }
 }

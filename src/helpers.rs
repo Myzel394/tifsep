@@ -4,29 +4,18 @@
 pub mod helpers {
     use std::sync::Arc;
 
-    use futures::{lock::Mutex, Future, StreamExt};
-    use reqwest::{Error, Response};
+    use bytes::Bytes;
+    use futures::{lock::Mutex, Future, Stream, StreamExt};
+    use reqwest::{Client, ClientBuilder, Error, Response};
 
-    use crate::engines::engine_base::engine_base::EngineBase;
+    use crate::engines::engine_base::engine_base::{EngineBase, ResultsCollector};
 
-    pub async fn run_search(
-        request: impl Future<Output = Result<Response, Error>>,
-        engine_ref: Arc<Mutex<impl EngineBase>>,
-    ) {
-        let response = request.await.unwrap();
+    const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.3";
 
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let buffer = chunk.unwrap();
-
-            let mut engine = engine_ref.lock().await;
-
-            if let Some(result) = engine.parse_packet(buffer.iter()) {
-                engine.add_result(result);
-
-                drop(engine);
-                tokio::task::yield_now().await;
-            }
-        }
+    pub fn build_default_client() -> Client {
+        ClientBuilder::new()
+            .user_agent(DEFAULT_USER_AGENT)
+            .build()
+            .unwrap()
     }
 }
