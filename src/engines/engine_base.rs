@@ -1,5 +1,5 @@
 pub mod engine_base {
-    use std::sync::Arc;
+    use std::{fmt::Display, sync::Arc};
 
     use futures::{lock::Mutex, Future, StreamExt};
     use lazy_static::lazy_static;
@@ -18,7 +18,19 @@ pub mod engine_base {
 
     #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
     pub enum SearchEngine {
+        Brave,
+        Bing,
         DuckDuckGo,
+    }
+
+    impl Display for SearchEngine {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SearchEngine::Brave => write!(f, "Brave"),
+                SearchEngine::DuckDuckGo => write!(f, "DuckDuckGo"),
+                SearchEngine::Bing => write!(f, "Bing"),
+            }
+        }
     }
 
     #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,15 +39,6 @@ pub mod engine_base {
         pub url: String,
         pub description: String,
         pub engine: SearchEngine,
-    }
-
-    /// ResultsCollector collects results across multiple tasks
-    #[derive(Clone, Debug, Hash, Default)]
-    pub struct ResultsCollector {
-        pub started: bool,
-        pub previous_block: String,
-        results: Vec<SearchResult>,
-        current_index: usize,
     }
 
     pub trait EngineBase {
@@ -82,45 +85,6 @@ pub mod engine_base {
         }
     }
 
-    impl ResultsCollector {
-        pub fn new() -> Self {
-            Self {
-                results: Vec::new(),
-                current_index: 0,
-                previous_block: String::new(),
-                started: false,
-            }
-        }
-
-        pub fn results(&self) -> &Vec<SearchResult> {
-            &self.results
-        }
-
-        pub fn add_result(&mut self, result: SearchResult) {
-            self.results.push(result);
-        }
-
-        pub fn get_next_items(&self) -> &[SearchResult] {
-            if self.current_index >= self.results.len() {
-                return &[];
-            }
-
-            &self.results[self.current_index + 1..self.results.len()]
-        }
-
-        pub fn update_index(&mut self) {
-            self.current_index = self.results.len() - 1;
-        }
-
-        pub fn has_more_results(&self) -> bool {
-            if self.results.len() == 0 {
-                return true;
-            }
-
-            self.current_index < self.results.len() - 1
-        }
-    }
-
     #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
     pub struct EnginePositions {
         pub previous_block: String,
@@ -163,6 +127,7 @@ pub mod engine_base {
         pub fn handle_block_using_default_method(
             &mut self,
             single_result_regex: &Regex,
+            engine: SearchEngine,
         ) -> Option<SearchResult> {
             if self.started {
                 if let Some(capture) = single_result_regex.captures(&self.previous_block.to_owned())
@@ -183,7 +148,7 @@ pub mod engine_base {
                         title,
                         description,
                         url,
-                        engine: SearchEngine::DuckDuckGo,
+                        engine,
                     };
 
                     let end_position = capture.get(0).unwrap().end();
