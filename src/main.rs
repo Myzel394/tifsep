@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::{str, thread};
 
 use engines::brave::brave::Brave;
+use engines::duckduckgo::duckduckgo::DuckDuckGo;
 use engines::engine_base::engine_base::{ResultsCollector, SearchResult};
 use futures::lock::Mutex;
 use lazy_static::lazy_static;

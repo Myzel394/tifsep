@@ -6,17 +6,22 @@ pub mod engine_base {
     use regex::Regex;
     use reqwest::{Error, Response};
     use tokio::sync::mpsc::Sender;
+    use urlencoding::decode;
+
+    use crate::utils::utils::decode_html_text;
 
     lazy_static! {
-        static ref STRIP: Regex = Regex::new(r"\s+").unwrap();
+        static ref STRIP: Regex = Regex::new(r"[\s\n]+").unwrap();
+        static ref STRIP_HTML_TAGS: Regex =
+            Regex::new(r#"<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>"#).unwrap();
     }
 
-    #[derive(Clone, Copy, Debug, Hash)]
+    #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
     pub enum SearchEngine {
         DuckDuckGo,
     }
 
-    #[derive(Clone, Debug, Hash)]
+    #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
     pub struct SearchResult {
         pub title: String,
         pub url: String,
@@ -52,7 +57,7 @@ pub mod engine_base {
             &mut self,
             request: impl Future<Output = Result<Response, Error>>,
             tx: Sender<SearchResult>,
-        ) {
+        ) -> Result<(), ()> {
             let mut stream = request.await.unwrap().bytes_stream();
 
             while let Some(chunk) = stream.next().await {
@@ -61,13 +66,19 @@ pub mod engine_base {
                 self.push_packet(buffer.iter());
 
                 while let Some(result) = self.parse_next() {
-                    tx.send(result).await;
+                    if tx.send(result).await.is_err() {
+                        return Err(());
+                    }
                 }
             }
 
             while let Some(result) = self.parse_next() {
-                tx.send(result).await;
+                if tx.send(result).await.is_err() {
+                    return Err(());
+                }
             }
+
+            Ok(())
         }
     }
 
@@ -131,6 +142,58 @@ pub mod engine_base {
 
             self.previous_block.clear();
             self.previous_block.push_str(&remaining_text);
+        }
+
+        pub fn handle_start_check_using_default_method<'a>(
+            &mut self,
+            results_start_regex: &Regex,
+            packet: impl Iterator<Item = &'a u8>,
+        ) {
+            let bytes: Vec<u8> = packet.map(|bit| *bit).collect();
+            let raw_text = String::from_utf8_lossy(&bytes);
+            let text = STRIP.replace_all(&raw_text, " ");
+
+            if self.started {
+                self.previous_block.push_str(&text);
+            } else {
+                self.started = results_start_regex.is_match(&text);
+            }
+        }
+
+        pub fn handle_block_using_default_method(
+            &mut self,
+            single_result_regex: &Regex,
+        ) -> Option<SearchResult> {
+            if self.started {
+                if let Some(capture) = single_result_regex.captures(&self.previous_block.to_owned())
+                {
+                    let title = decode(capture.name("title").unwrap().as_str())
+                        .unwrap()
+                        .into_owned();
+                    let description_raw =
+                        decode_html_text(capture.name("description").unwrap().as_str()).unwrap();
+                    let description = STRIP_HTML_TAGS
+                        .replace_all(&description_raw, "")
+                        .into_owned();
+                    let url = decode(capture.name("url").unwrap().as_str())
+                        .unwrap()
+                        .into_owned();
+
+                    let result = SearchResult {
+                        title,
+                        description,
+                        url,
+                        engine: SearchEngine::DuckDuckGo,
+                    };
+
+                    let end_position = capture.get(0).unwrap().end();
+                    self.slice_remaining_block(&end_position);
+
+                    return Some(result);
+                }
+            }
+
+            None
         }
     }
 }
