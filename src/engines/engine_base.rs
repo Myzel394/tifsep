@@ -1,14 +1,16 @@
 pub mod engine_base {
-    use std::{fmt::Display, sync::Arc};
+    use core::fmt;
+    use std::{fmt::Debug, fmt::Display, sync::Arc};
 
     use futures::{lock::Mutex, Future, StreamExt};
     use lazy_static::lazy_static;
     use regex::Regex;
     use reqwest::{Error, Response};
+    use rustc_hash::FxHashMap;
     use tokio::sync::mpsc::Sender;
     use urlencoding::decode;
 
-    use crate::utils::utils::decode_html_text;
+    use crate::utils::utils::{decode_html_text, hash_string};
 
     lazy_static! {
         static ref STRIP: Regex = Regex::new(r"[\s\n]+").unwrap();
@@ -41,6 +43,16 @@ pub mod engine_base {
         pub engine: SearchEngine,
     }
 
+    impl SearchResult {
+        pub fn get_html_id(&self) -> String {
+            format!(
+                "html-id-{}-{}",
+                hash_string(&self.url),
+                self.url[self.url.len() - 5..].to_string(),
+            )
+        }
+    }
+
     pub trait EngineBase {
         fn parse_next<'a>(&mut self) -> Option<SearchResult>;
 
@@ -61,7 +73,9 @@ pub mod engine_base {
             request: impl Future<Output = Result<Response, Error>>,
             tx: Sender<SearchResult>,
         ) -> Result<(), ()> {
-            let mut stream = request.await.unwrap().bytes_stream();
+            let req = request.await.unwrap();
+            let url = req.url().clone();
+            let mut stream = req.bytes_stream();
 
             while let Some(chunk) = stream.next().await {
                 let buffer = chunk.unwrap();

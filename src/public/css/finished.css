@@ -1,0 +1,10 @@
+#search-status-__engine__::after {
+    content: "{% time %}ms";
+    animation: fadeIn 0.5s;
+}
+
+#search-status-__engine__ svg {
+    filter: grayscale(50%);
+    transform: translateY(-100%);
+    animation: none !important;
+}

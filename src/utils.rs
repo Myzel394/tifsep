@@ -329,4 +329,15 @@ pub mod utils {
         YieldRequired(T),
         Completed(T),
     }
+
+    /// A very fast string hasher
+    pub fn hash_string(input: &str) -> u64 {
+        let mut value: u64 = 5381;
+
+        for c in input.chars() {
+            value = (value << 5).wrapping_add(value).wrapping_add(c as u64);
+        }
+
+        value
+    }
 }

@@ -1,0 +1,180 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #2d2d2d;
+    font-family: Roboto, Helvetica, Arial, sans-serif;
+    max-width: 1200px;
+    margin: 0 auto;
+    color: #aaa;
+}
+
+main {
+    min-height: 100dvh;
+    display: grid;
+    grid-template-columns: 70% 30%;
+    gap: 2em;
+    margin: 2em 0;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 2em 0;
+}
+
+#search-input {
+    display: flex;
+    align-items: center;
+    gap: 1em;
+}
+
+#search {
+    min-width: 10em;
+    font-size: 1rem;
+    padding: 0.5em 1.2em;
+    border: none;
+    border-radius: 10em;
+    background: #555;
+    color: #fff;
+}
+
+#search-status {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4em;
+}
+
+#search-status>div {
+    position: relative;
+}
+
+#search-status>div>svg {
+    animation: shimmer 0.5s infinite linear;
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    width: 1.4em;
+    height: 1.4em;
+}
+
+@keyframes shimmer {
+
+    0%,
+    100% {
+        filter: brightness(0.4);
+    }
+
+    50% {
+        filter: brightness(1);
+    }
+}
+
+#search-status-bing::after {
+    content: "";
+    font-size: 0.8rem;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+#search-status-duckduckgo::after {
+    content: "";
+    font-size: 0.8rem;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+#search-status-brave::after {
+    content: "";
+    font-size: 0.8rem;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+#back-button {
+    background: #555;
+    fill: #fff;
+
+    width: 2em;
+    height: 2em;
+    padding: 0.5em;
+    border-radius: 50%;
+}
+
+li {
+    list-style: none;
+    background: #222;
+    padding: 1em;
+    margin: 1em 0;
+    border-radius: 0.5em;
+    animation: moveIn 0.5s;
+}
+
+li h1 {
+    color: #fff;
+    text-decoration: none;
+    font-size: 1.2rem;
+}
+
+li p {
+    color: #aaa;
+    line-height: 1.5;
+    font-size: 0.9rem;
+}
+
+li.fake {
+    height: 6em;
+    animation: fakeShimmer 0.8s infinite linear;
+}
+
+li.fake.big {
+    height: 12em;
+}
+
+li.fake.small {
+    height: 3em;
+}
+
+@keyframes fakeShimmer {
+
+    0%,
+    100% {
+        filter: brightness(1.3)
+    }
+
+    50% {
+        filter: brightness(1)
+    }
+}
+
+@keyframes moveIn {
+    from {
+        opacity: 0;
+        transform: translateY(1em);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}

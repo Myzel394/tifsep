@@ -14,7 +14,7 @@ pub mod bing {
 
     lazy_static! {
         static ref RESULTS_START: Regex = Regex::new(r#"id="b_results""#).unwrap();
-        static ref SINGLE_RESULT: Regex = Regex::new(r#"<li class="b_algo".*?<h2.*?><a href="(?P<url>.+?)".*?>(?P<title>.+?)</a></h2>.*?((<div class="b_caption.*?<p.*?)|(<p class="b_lineclamp3.*?))><span.*?</span>(?P<description>.*?)</p>.*?</li>"#).unwrap();
+        static ref SINGLE_RESULT: Regex = Regex::new(r#"<li class="b_algo".*?<h2.*?><a href="(?P<url>.+?)".*?>(?P<title>.+?)</a></h2>.*?((<div class="b_caption.*?<p.*?)|(<p class="b_lineclamp.*?))><span.*?</span>(?P<description>.*?)</p>.*?</li>"#).unwrap();
     }
 
     #[derive(Clone, Debug)]
