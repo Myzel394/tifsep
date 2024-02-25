@@ -14,8 +14,10 @@ pub mod brave {
 
     lazy_static! {
         static ref RESULTS_START: Regex = Regex::new(r#"<body"#).unwrap();
-        static ref SINGLE_RESULT: Regex = Regex::new(r#"<div class="snippet svelte-.+?<a href=.(?P<url>.+?)".+?<div class="title svelte-.+?">(?P<title>.+?)</div></div>.+?<div class="snippet-description.+?">(?P<description>.+?)</div></div>"#).unwrap();
+        static ref SINGLE_RESULT: Regex = Regex::new(r#"<div class="snippet svelte-.+?<a href=.(?P<url>.+?)".+?(?:.+?<img.+?src="(?P<image>.+?)")?.+?<div class="title svelte-.+?">(?P<title>.+?)</div></div>.+?<div class="snippet-description.+?">(?:(?P<date>.+?) - )?(?P<description>.+?)</div>.*?</div>.*?</div>"#).unwrap();
     }
+
+    const DATE_FORMAT: &str = "%m %d, %Y";
 
     #[derive(Clone, Debug)]
     pub struct Brave {
@@ -24,8 +26,11 @@ pub mod brave {
 
     impl EngineBase for Brave {
         fn parse_next<'a>(&mut self) -> Option<SearchResult> {
-            self.positions
-                .handle_block_using_default_method(&SINGLE_RESULT, SearchEngine::Brave)
+            self.positions.handle_block_using_default_method(
+                &SINGLE_RESULT,
+                SearchEngine::Brave,
+                Some(DATE_FORMAT),
+            )
         }
 
         fn push_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {

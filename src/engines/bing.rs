@@ -14,8 +14,10 @@ pub mod bing {
 
     lazy_static! {
         static ref RESULTS_START: Regex = Regex::new(r#"id="b_results""#).unwrap();
-        static ref SINGLE_RESULT: Regex = Regex::new(r#"<li class="b_algo".*?<h2.*?><a href="(?P<url>.+?)".*?>(?P<title>.+?)</a></h2>.*?((<div class="b_caption.*?<p.*?)|(<p class="b_lineclamp.*?))><span.*?</span>(?P<description>.*?)</p>.*?</li>"#).unwrap();
+        static ref SINGLE_RESULT: Regex = Regex::new(r#"<li class="b_algo".*?siteicon.*?>.*?<img src="(?P<image>.+?)"(?:.*?class="b_attribution".*?u="(?P<cache>.+?)")?.*?<h2.*?><a href="(?P<url>.+?)".*?>(?P<title>.+?)</a></h2>.*?((<div class="b_caption.*?<p.*?)|(<p class="b_lineclamp.*?))><span.*?</span>(?P<description>.*?)</p>.*?</li>"#).unwrap();
     }
+
+    const DATE_FORMAT: &str = "%b %d, %Y";
 
     #[derive(Clone, Debug)]
     pub struct Bing {
@@ -24,8 +26,11 @@ pub mod bing {
 
     impl EngineBase for Bing {
         fn parse_next<'a>(&mut self) -> Option<SearchResult> {
-            self.positions
-                .handle_block_using_default_method(&SINGLE_RESULT, SearchEngine::Bing)
+            self.positions.handle_block_using_default_method(
+                &SINGLE_RESULT,
+                SearchEngine::Bing,
+                Some(DATE_FORMAT),
+            )
         }
 
         fn push_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {

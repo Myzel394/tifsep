@@ -1,15 +1,18 @@
 use std::str;
 
+use ahash::AHashSet;
 use engines::bing::bing::Bing;
 use engines::brave::brave::Brave;
 use engines::duckduckgo::duckduckgo::DuckDuckGo;
 use engines::engine_base::engine_base::SearchResult;
 use lazy_static::lazy_static;
-use regex::Regex;
+use rocket::form::Form;
 use rocket::response::content::{RawCss, RawHtml};
 use rocket::response::stream::TextStream;
 use rocket::time::Instant;
-use static_files::static_files::{render_beginning_html, render_finished_css};
+use static_files::static_files::{
+    render_beginning_html, render_finished_css, render_result, render_result_engine_visibility,
+};
 use tokio::sync::mpsc;
 
 use crate::static_files::static_files::read_file_contents;
@@ -25,26 +28,8 @@ pub mod utils;
 extern crate rocket;
 
 lazy_static! {
-    static ref HTML_BEGINNING: String =
-        read_file_contents("./src/public/html/beginning.html").unwrap();
-    static ref SET_VALUE_REPLACE: Regex = Regex::new(r#"\{\% search_value \%\}"#).unwrap();
     static ref HTML_END: String = read_file_contents("./src/public/html/end.html").unwrap();
     static ref TAILWIND_CSS: String = read_file_contents("./src/public/css/style.css").unwrap();
-    static ref FINISHED_CSS: String = read_file_contents("./src/public/css/finished.css").unwrap();
-    static ref FINISHED_NAME_REPLACE: Regex = Regex::new(r#"(__engine__)"#).unwrap();
-    static ref FINISHED_TIME_REPLACE: Regex = Regex::new(r#"{% time %}"#).unwrap();
-}
-
-#[get("/search")]
-fn search_get() -> &'static str {
-    "<html>
-        <body>
-            <form method='get' action='/searchquery'>
-                <input name='query'>
-                <button type='submit'>Search</button>
-            </form>
-        </body>
-    </html>"
 }
 
 #[get("/style.css")]
@@ -52,8 +37,29 @@ fn get_tailwindcss() -> RawCss<&'static str> {
     RawCss(&TAILWIND_CSS)
 }
 
-#[get("/searchquery?<query>")]
-async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
+#[get("/")]
+async fn search_get() -> RawHtml<&'static str> {
+    RawHtml(include_str!("./public/html/frontpage.html"))
+}
+
+#[derive(FromForm)]
+struct Body {
+    query: String,
+}
+
+macro_rules! search {
+    ($engine:ident,$query_ref:expr,$tx_ref:expr) => {{
+        tokio::spawn(async move {
+            let mut engine = $engine::new();
+
+            engine.search($query_ref, $tx_ref).await
+        })
+    }};
+}
+
+#[post("/", data = "<body>")]
+async fn search_post<'a>(body: Form<Body>) -> RawHtml<TextStream![String]> {
+    let query = &body.query;
     let query_brave = query.to_owned().clone();
     let query_duckduckgo = query.to_owned().clone();
     let query_bing = query.to_owned().clone();
@@ -72,31 +78,25 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
 
     let now = Instant::now();
 
-    let brave_task = tokio::spawn(async move {
-        let mut brave = Brave::new();
-
-        brave.search(&query_brave, tx_brave).await;
-    });
-
-    let duckduckgo_task = tokio::spawn(async move {
-        let mut duckduckgo = DuckDuckGo::new();
-
-        duckduckgo.search(&query_duckduckgo, tx_duckduckgo).await;
-    });
-
-    let bing_task = tokio::spawn(async move {
-        let mut bing = Bing::new();
-
-        bing.search(&query_bing, tx_bing).await;
-    });
+    let brave_task = search!(Brave, &query_brave, tx_brave);
+    let bing_task = search!(Bing, &query_bing, tx_bing);
+    let duckduckgo_task = search!(DuckDuckGo, &query_duckduckgo, tx_duckduckgo);
 
     let beginning_html = render_beginning_html(&query);
+
+    let mut results: AHashSet<String> = AHashSet::new();
 
     RawHtml(TextStream! {
         yield beginning_html;
 
         while !brave_task.is_finished() || !duckduckgo_task.is_finished() || !bing_task.is_finished() {
             while let Some(result) = rx.recv().await {
+                if results.contains(&result.url) {
+                    yield render_result_engine_visibility(&result.get_html_id(), &result.engine);
+
+                    continue;
+                }
+
                 if !first_result_yielded {
                     let diff = first_result_start.elapsed().whole_milliseconds();
                     first_result_yielded = true;
@@ -123,9 +123,10 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
                     yield render_finished_css("duckduckgo", now.elapsed().whole_milliseconds());
                 }
 
-                let text = format!("<li><h1>{}</h1><p>{}</p><i>{}</i></li>", &result.title, &result.description, &result.engine.to_string());
+                yield render_result(&result);
+                yield render_result_engine_visibility(&result.get_html_id(), &result.engine);
 
-                yield text.to_string();
+                results.insert(result.url.to_string());
             }
         }
 
@@ -151,7 +152,6 @@ async fn hello<'a>(query: &str) -> RawHtml<TextStream![String]> {
 #[launch]
 async fn rocket() -> _ {
     rocket::build()
-        .mount("/", routes![hello])
-        .mount("/", routes![search_get])
+        .mount("/", routes![search_post, search_get])
         .mount("/", routes![get_tailwindcss])
 }

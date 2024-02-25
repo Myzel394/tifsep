@@ -1,0 +1,31 @@
+<li class="result" id="__ID__">
+    <a href="{% url %}" target="_blank" rel="noopener noreferrer nofollower">
+        <article>
+            <div class="image">
+                <!-- We need to add a separate div that adds the roundness,
+                    as directly rounding the <img> tag will cause a the
+                    broken, misaligned image to be visible when
+                    the fallback image is shown. -->
+                <div class="round">
+                    <img src="{% image_url %}" alt="🌐" loading="lazy">
+                </div>
+            </div>
+            <div class="content">
+                <small class="url">{% url %}</small>
+                <h3>{% title %}</h3>
+                <p>{% description %}</p>
+            </div>
+        </article>
+        <ul class="search-engines">
+            <li class="bing">Bing</li>
+            <li class="duckduckgo">DuckDuckGo</li>
+            <li class="brave">Brave</li>
+        </ul>
+        <small>{% date %}</small>
+    </a>
+</li>
+<style>
+    #__ID__ .image img::after {
+        background-image: url("https://{% url_host %}/favicon.ico");
+    }
+</style>

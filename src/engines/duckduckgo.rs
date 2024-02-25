@@ -25,8 +25,11 @@ pub mod duckduckgo {
 
     impl EngineBase for DuckDuckGo {
         fn parse_next<'a>(&mut self) -> Option<SearchResult> {
-            self.positions
-                .handle_block_using_default_method(&SINGLE_RESULT, SearchEngine::DuckDuckGo)
+            self.positions.handle_block_using_default_method(
+                &SINGLE_RESULT,
+                SearchEngine::DuckDuckGo,
+                None,
+            )
         }
 
         fn push_packet<'a>(&mut self, packet: impl Iterator<Item = &'a u8>) {
