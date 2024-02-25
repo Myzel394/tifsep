@@ -11,7 +11,6 @@ Even without HTTP/3 support currently*, tifsep can yield results within
 *HTTP/3 support is coming soon!
 
 **tifsep is currently in early development.**
-
 If you'd like to test it out and provide early feedback, please do so!
 
 ## Ideas
